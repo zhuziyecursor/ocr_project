@@ -29,9 +29,21 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/review-new/:docId',
+    name: 'ReviewNew',
+    component: () => import('@/views/ReviewNew.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/compare/:docAId/:docBId',
     name: 'Compare',
     component: () => import('@/views/Compare.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/ocr-render',
+    name: 'OcrRender',
+    component: () => import('@/views/OcrRender.vue'),
     meta: { requiresAuth: true }
   }
 ]

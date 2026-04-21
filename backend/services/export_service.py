@@ -44,6 +44,9 @@ class ExportService:
 
         result_json = rec.result_json
 
+        # kids 格式总页数
+        total_pages_count = result_json.get("number of pages") or document.total_pages or 0
+
         # 查已核验的 block_id 集合
         review_query = await self.db.execute(
             select(ReviewRecord).where(ReviewRecord.document_id == document_id)
@@ -51,13 +54,21 @@ class ExportService:
         review_records = review_query.scalars().all()
         reviewed_block_ids = {r.block_id for r in review_records if r.block_id}
 
-        # 收集所有 need_review=True 的 block
+        # 收集所有 need_review=True 的 block（兼容 kids 和 Docling 格式）
         unreviewed_blocks = []
-        pages = result_json.get("pages", [])
-        for page in pages:
-            for block in page.get("blocks", []):
-                if block.get("need_review") and block.get("id") not in reviewed_block_ids:
-                    unreviewed_blocks.append(block)
+
+        if "kids" in result_json:
+            # kids 格式：扁平列表，每条记录带 page number
+            for kid in result_json["kids"]:
+                if kid.get("need_review") and kid.get("id") not in reviewed_block_ids:
+                    unreviewed_blocks.append(kid)
+        else:
+            # Docling 格式：pages → blocks 层级
+            pages = result_json.get("pages", [])
+            for page in pages:
+                for block in page.get("blocks", []):
+                    if block.get("need_review") and block.get("id") not in reviewed_block_ids:
+                        unreviewed_blocks.append(block)
 
         lines = []
 
@@ -65,7 +76,7 @@ class ExportService:
         lines.append(f"# {document.file_name}")
         lines.append(f"\n> 导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"> 文档状态：{document.status}")
-        lines.append(f"> 总页数：{document.total_pages or len(pages)}")
+        lines.append(f"> 总页数：{total_pages_count}")
 
         # 未核验警告
         if unreviewed_blocks:
@@ -87,34 +98,55 @@ class ExportService:
 
         # 正文内容（按页）
         lines.append("\n## 识别内容")
-        for page in pages:
-            page_no = page.get("page_no", page.get("page", "?"))
-            lines.append(f"\n### 第 {page_no} 页")
 
-            for block in page.get("blocks", []):
-                block_type = block.get("type", "text")
-                content = block.get("content") or block.get("text") or ""
-                need_review = block.get("need_review", False)
-                is_reviewed = block.get("id") in reviewed_block_ids
+        if "kids" in result_json:
+            # kids 格式：按 page number 分组
+            page_map = {}
+            for kid in result_json["kids"]:
+                page_no = kid.get("page number", kid.get("page", "?"))
+                if page_no not in page_map:
+                    page_map[page_no] = []
+                page_map[page_no].append(kid)
 
-                if block_type in ("table",):
-                    lines.append(self._render_table(block))
-                elif block_type in ("image", "chart"):
-                    desc = block.get("description") or "[图片/图表]"
-                    lines.append(f"\n![{desc}]({block.get('image_url', '')})")
-                    lines.append(f"\n> {desc}")
-                else:
-                    if need_review and not is_reviewed:
-                        lines.append(f"\n> 🔵 **[待核验]** {content}")
-                    elif need_review and is_reviewed:
-                        lines.append(f"\n{content} *(已核验)*")
-                    else:
-                        lines.append(f"\n{content}")
+            for page_no in sorted(page_map.keys(), key=lambda x: (isinstance(x, int), x)):
+                lines.append(f"\n### 第 {page_no} 页")
+                for block in page_map[page_no]:
+                    self._render_block_to_lines(block, lines, reviewed_block_ids)
+        else:
+            # Docling 格式：pages → blocks 层级
+            doc_pages = result_json.get("pages", [])
+            for page in doc_pages:
+                page_no = page.get("page_no", page.get("page", "?"))
+                lines.append(f"\n### 第 {page_no} 页")
+
+                for block in page.get("blocks", []):
+                    self._render_block_to_lines(block, lines, reviewed_block_ids)
 
         markdown = "\n".join(lines)
         safe_name = document.file_name.rsplit(".", 1)[0]
         filename = f"{safe_name}_识别结果.md"
         return markdown, filename
+
+    def _render_block_to_lines(self, block: dict, lines: list, reviewed_block_ids: set) -> None:
+        """将单个 block 渲染为 Markdown 行追加到 lines"""
+        block_type = block.get("type", "text")
+        content = block.get("content") or block.get("text") or ""
+        need_review = block.get("need_review", False)
+        is_reviewed = block.get("id") in reviewed_block_ids
+
+        if block_type in ("table",):
+            lines.append(self._render_table(block))
+        elif block_type in ("image", "chart"):
+            desc = block.get("description") or "[图片/图表]"
+            lines.append(f"\n![{desc}]({block.get('image_url', '')})")
+            lines.append(f"\n> {desc}")
+        else:
+            if need_review and not is_reviewed:
+                lines.append(f"\n> 🔵 **[待核验]** {content}")
+            elif need_review and is_reviewed:
+                lines.append(f"\n{content} *(已核验)*")
+            else:
+                lines.append(f"\n{content}")
 
     def _render_table(self, block: dict) -> str:
         """把 table block 渲染为 Markdown 表格"""

@@ -152,9 +152,10 @@ function handleCompare() {
             {{ new Date(row.created_at).toLocaleString() }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240">
+        <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <el-button v-if="row.status === 'DONE'" type="primary" size="small" @click="handleReview(row)">核验</el-button>
+            <el-button v-if="row.status === 'DONE'" type="success" size="small" @click="router.push(`/review-new/${row.id}`)">新核验</el-button>
             <el-button
               v-if="row.status === 'DONE'"
               :type="isSelected(row) ? 'success' : ''"
@@ -162,7 +163,7 @@ function handleCompare() {
               plain
               @click="toggleCompareSelect(row)"
             >{{ isSelected(row) ? '✓ 已选' : '选择比对' }}</el-button>
-            <el-button v-if="row.status === 'FAILED'" type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

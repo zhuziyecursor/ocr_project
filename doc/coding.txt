@@ -1,0 +1,37 @@
+## 当前任务
+将系统改回使用 OpenDataLoader 旧格式（kids 格式），而不是 Docling 新格式
+
+## 任务状态
+⏳ 待开始
+
+## 问题诊断结果
+
+### 发现的问题
+1. **OpenDataLoader 输出两种格式：**
+   - 旧格式：保存到 `/private/tmp/ocr_project/{doc_id}/`，使用 `kids` 字段
+   - 新格式：API 返回，使用 `document.json_content.texts` 字段
+
+2. **数据库当前保存的是新格式 + 审计字段**
+
+3. **ccr_result/ 下的文件就是旧格式，和 OpenDataLoader 本地保存的完全一致**（两个文件都有 1147 个 kids）
+
+4. **Review.vue 第 176 行硬编码优先加载 ccr_result/ 下的旧格式**
+
+### 用户决策
+- 用户确认**旧格式是对的**
+- 需要改回使用旧格式（kids 格式）
+- 数据库也要保存旧格式
+
+### 需要修改的文件
+1. **backend/ocr/wrapper.py** - 确保调用 OpenDataLoader 时获取旧格式
+2. **backend/ocr/audit_enhancer.py** - 修改审计增强层以支持旧格式（kids）
+3. **backend/tasks/document_tasks.py** - 保存旧格式到数据库
+4. **backend/services/document_service.py** - 返回旧格式
+5. **frontend/src/views/Review.vue** - 删除硬编码的 ccr_result 加载，只从数据库读取
+6. **frontend/src/stores/compare.js** - 确保处理旧格式
+7. **其他相关渲染组件** - 适配旧格式
+
+## 历史任务（已废弃）
+### 将 OCR 渲染功能同步到分屏页面，同时切换到数据库数据源
+- 原因：决定改用回旧格式，此任务废弃
+

@@ -29,17 +29,108 @@ def process_document_task(self, document_id: str, file_path: str):
     1. 更新文档状态为 PROCESSING
     2. 调用 OpenDataLoader 进行识别
     3. 审计增强（置信度、need_review标记）
-    4. 存储识别结果
+    4. 存储识别结果（数据库 + 本地文件）
     5. 更新文档状态为 DONE
     """
+    import os
+    import base64
+    import json
     from core.database import AsyncSessionLocal
     from services.document_service import DocumentService
     from ocr.wrapper import OpenDataLoaderWrapper
     from ocr.audit_enhancer import AuditEnhancer
     from models.document import RecognitionResult
-    import json
+
+    # 本地存储目录
+    LOCAL_RESULT_DIR = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "ocr_res", document_id
+    )
+
+    def save_to_local(result_json: dict, output_dir: str):
+        """
+        将识别结果保存到本地目录
+        目录结构：
+        ocr_res/{document_id}/
+        ├── result.json          # 识别结果
+        └── images/              # 图片目录
+            ├── imageFile89.png  # OpenDataLoader 提取的图片
+            └── ...
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        images_dir = os.path.join(output_dir, "images")
+        os.makedirs(images_dir, exist_ok=True)
+
+        # 收集已复制的图片文件名（OpenDataLoader 输出 imageFileN.png）
+        copied_images = {}
+        if os.path.exists(images_dir):
+            for fname in os.listdir(images_dir):
+                name_part = os.path.splitext(fname)[0]
+                # imageFileN.png 格式，提取 N 作为 kid id
+                if name_part.startswith("imageFile") and name_part[9:].isdigit():
+                    kid_id = int(name_part[9:])
+                    copied_images[kid_id] = fname
+                elif name_part.isdigit():
+                    copied_images[int(name_part)] = fname
+
+        # 1. 保存 result.json（深拷贝，避免修改原数据）
+        result_copy = {k: v for k, v in result_json.items() if k != 'kids'}
+        kids_saved = []
+
+        for kid in result_json.get("kids", []):
+            kid_copy = dict(kid)
+            # 如果有内嵌图片（Base64），提取保存
+            if kid.get("type") == "image" and kid.get("data"):
+                img_data = kid["data"]
+                img_format = kid.get("format", "png")
+                kid_id = kid.get("id", len(kids_saved))
+                img_filename = f"{kid_id}.{img_format}"
+                img_path = os.path.join(images_dir, img_filename)
+
+                try:
+                    # 解析 Base64 数据
+                    if img_data.startswith("data:"):
+                        # data:image/png;base64,iVBOrw0KGgo...
+                        header, b64_data = img_data.split(",", 1)
+                        img_bytes = base64.b64decode(b64_data)
+                    else:
+                        img_bytes = base64.b64decode(img_data)
+
+                    with open(img_path, "wb") as f:
+                        f.write(img_bytes)
+
+                    # 修改 kid 中的 data 为文件路径
+                    kid_copy["data"] = None
+                    kid_copy["source"] = f"images/{img_filename}"
+                    kid_copy["local_path"] = img_path
+                except Exception:
+                    # 如果图片保存失败，保留原 data
+                    pass
+            elif kid.get("type") == "image":
+                # 外部图片：已在 convert_with_images 时复制到 images_dir
+                # 只有已有 source 的才修正路径；没有 source 的保持原样（不乱关联到错误图片）
+                old_source = kid_copy.get("source", "")
+                if old_source and "_images/" in old_source:
+                    # old_source 形如 "Claude Code从入门到精通-v2.0.0_images/imageFile1.png"
+                    # 需要改成 "images/imageFile1.png"
+                    fname = old_source.split("_images/", 1)[-1]
+                    kid_copy["source"] = f"images/{fname}"
+                    kid_copy["local_path"] = os.path.join(images_dir, fname)
+
+            kids_saved.append(kid_copy)
+
+        result_copy["kids"] = kids_saved
+
+        # 保存 JSON 文件
+        json_path = os.path.join(output_dir, "result.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(result_copy, f, ensure_ascii=False, indent=2)
+
+        return json_path, images_dir, result_copy
 
     async def _process():
+        from datetime import datetime
+
         async with AsyncSessionLocal() as db:
             service = DocumentService(db)
 
@@ -47,11 +138,69 @@ def process_document_task(self, document_id: str, file_path: str):
             await service.update_document_status(document_id, "PROCESSING")
 
             try:
-                # 2. 调用 OpenDataLoader
                 wrapper = OpenDataLoaderWrapper()
-                raw_result = wrapper.convert(file_path)
 
-                if raw_result is None:
+                # 分块处理日志（每块50页）
+                page_logs = []
+                CHUNK_SIZE = 50
+                start_page = 1
+
+                # 先获取总页数（通过 convert_chunk 获取第一块来估算）
+                first_chunk = wrapper.convert_chunk(file_path, start_page=1, end_page=CHUNK_SIZE)
+                first_chunk_start = datetime.now()
+                total_pages_estimate = max([kid.get("page number", 0) for kid in first_chunk.get("kids", [])] or [0])
+
+                # 记录第一块
+                page_logs.append({
+                    "chunk": f"1-{CHUNK_SIZE}",
+                    "pages": list(range(1, CHUNK_SIZE + 1)),
+                    "processing_path": "backend",
+                    "model": "docling-fast",
+                    "start_time": first_chunk_start.isoformat(),
+                    "end_time": datetime.now().isoformat(),
+                    "duration_ms": int((datetime.now() - first_chunk_start).total_seconds() * 1000),
+                    "blocks_count": len(first_chunk.get("kids", []))
+                })
+
+                # 继续处理剩余块
+                all_kids = first_chunk.get("kids", [])
+                start_page = CHUNK_SIZE + 1
+
+                while start_page <= total_pages_estimate:
+                    chunk_result = wrapper.convert_chunk(file_path, start_page=start_page, end_page=start_page + CHUNK_SIZE - 1)
+                    chunk_start = datetime.now()
+                    chunk_kids = chunk_result.get("kids", [])
+                    all_kids.extend(chunk_kids)
+
+                    actual_end = start_page
+                    for kid in chunk_kids:
+                        pn = kid.get("page number", 0)
+                        if pn > actual_end:
+                            actual_end = pn
+
+                    page_logs.append({
+                        "chunk": f"{start_page}-{start_page + CHUNK_SIZE - 1}",
+                        "pages": list(range(start_page, start_page + CHUNK_SIZE)),
+                        "processing_path": "backend",
+                        "model": "docling-fast",
+                        "start_time": chunk_start.isoformat(),
+                        "end_time": datetime.now().isoformat(),
+                        "duration_ms": int((datetime.now() - chunk_start).total_seconds() * 1000),
+                        "blocks_count": len(chunk_kids)
+                    })
+
+                    if len(chunk_kids) < CHUNK_SIZE:
+                        break
+                    start_page += CHUNK_SIZE
+
+                # 构建结果
+                raw_result = {
+                    "file name": first_chunk.get("file name", ""),
+                    "number of pages": total_pages_estimate,
+                    "kids": all_kids
+                }
+
+                if not raw_result.get("kids"):
                     raise ValueError(
                         "OpenDataLoader 返回空结果，可能是文件损坏、格式不支持或 Hybrid Server 异常。"
                         f"文件路径：{file_path}"
@@ -64,24 +213,38 @@ def process_document_task(self, document_id: str, file_path: str):
                 if enhanced_result is None:
                     raise ValueError("审计增强层返回空结果，原始识别结果可能为空。")
 
-                # 4. 存储识别结果
+                # 4. 保存到本地目录
+                json_path, images_dir, saved_result = save_to_local(enhanced_result, LOCAL_RESULT_DIR)
+
+                # 保存处理日志
+                log_path = os.path.join(LOCAL_RESULT_DIR, "page_processing_log.json")
+                with open(log_path, "w", encoding="utf-8") as f:
+                    json.dump(page_logs, f, ensure_ascii=False, indent=2)
+
+                # 5. 存储识别结果到数据库
                 result_record = RecognitionResult(
                     document_id=document_id,
-                    result_json=enhanced_result,
-                    storage_path=file_path.replace("/tmp/ocr_project/", "/data/recognition_results/")
+                    result_json=saved_result,
+                    storage_path=LOCAL_RESULT_DIR
                 )
                 db.add(result_record)
 
-                # 5. 更新状态为完成
+                # 6. 更新状态为完成
                 await service.update_document_status(
                     document_id, "DONE",
-                    total_pages=enhanced_result.get("total_pages", 0)
+                    total_pages=total_pages_estimate
                 )
 
-                return {"status": "success", "document_id": document_id}
+                return {
+                    "status": "success",
+                    "document_id": document_id,
+                    "local_path": LOCAL_RESULT_DIR,
+                    "json_path": json_path,
+                    "log_path": log_path,
+                    "images_count": len(os.listdir(images_dir)) if os.path.exists(images_dir) else 0
+                }
 
             except Exception as e:
-                # 处理失败，更新状态
                 await service.update_document_status(
                     document_id, "FAILED",
                     error_message=str(e)

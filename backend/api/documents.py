@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Path
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
+import os
 import uuid
 
 from core.database import get_db
@@ -179,3 +180,27 @@ async def compare_documents(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"diffs": diffs}
+
+@router.get("/{document_id}/images/{image_name}")
+async def get_document_image(
+    document_id: str = Path(...),
+    image_name: str = Path(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取文档识别结果中的图片文件"""
+    document_id = validate_uuid(document_id)
+
+    # 安全检查：防止路径穿越
+    if ".." in image_name or image_name.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid image name")
+
+    # 从本地存储读取图片（从 api/documents.py 到项目根目录需要 3 层）
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    local_path = os.path.join(project_root, "ocr_res", document_id, "images", image_name)
+
+    from fastapi.responses import FileResponse
+    if not os.path.exists(local_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return FileResponse(local_path)
+

@@ -15,6 +15,25 @@ export const useCompareStore = defineStore('compare', () => {
 
   // 展平 A 的所有 blocks（Review 页单文档用）
   const blocksA = computed(() => {
+    // 优先处理 OpenDataLoader 旧格式（kids 格式）
+    if (resultA.value?.kids) {
+      const blocks = []
+      for (const item of resultA.value.kids) {
+        const pageNo = item['page number'] || 1
+        const bbox = item['bounding box'] || item.bbox
+        blocks.push({
+          ...item,
+          _page: pageNo,
+          block_id: item.id?.toString() || `kid_${Math.random()}`,
+          content: item.content || item.text || '',
+          bbox: bbox,
+          _type: item.type
+        })
+      }
+      return blocks
+    }
+
+    // 兼容 Docling 格式
     const json = resultA.value?.document?.json_content
     if (!json) return []
     const blocks = []
@@ -56,6 +75,25 @@ export const useCompareStore = defineStore('compare', () => {
 
   // 展平 B 的所有 blocks（Compare 页用）
   const blocksB = computed(() => {
+    // 优先处理 OpenDataLoader 旧格式（kids 格式）
+    if (resultB.value?.kids) {
+      const blocks = []
+      for (const item of resultB.value.kids) {
+        const pageNo = item['page number'] || 1
+        const bbox = item['bounding box'] || item.bbox
+        blocks.push({
+          ...item,
+          _page: pageNo,
+          block_id: item.id?.toString() || `kid_${Math.random()}`,
+          content: item.content || item.text || '',
+          bbox: bbox,
+          _type: item.type
+        })
+      }
+      return blocks
+    }
+
+    // 兼容 Docling 格式
     const json = resultB.value?.document?.json_content
     if (!json) return []
     const blocks = []

@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     DEFAULT_ADMIN_USER: str = "admin"
     DEFAULT_ADMIN_PASSWORD: str = "admin123"
 
+    # LLM (豆包大模型)
+    LLM_API_KEY: str = "ark-61add44d-80bc-4fe5-868e-d66b81c9554f-afd44"
+    LLM_MODEL: str = "doubao-coder"
+
     class Config:
         env_file = ".env"
         extra = "allow"

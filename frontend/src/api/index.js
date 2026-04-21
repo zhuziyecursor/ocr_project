@@ -91,5 +91,23 @@ export default {
   getDocumentFileUrl(docId) {
     const token = localStorage.getItem('access_token')
     return `/api/documents/${docId}/file${token ? '?token=' + token : ''}`
+  },
+
+  // 本地 OCR 结果文件
+  listOcrFiles() {
+    return apiClient.get('/ocr-files/')
+  },
+  getOcrFile(filename) {
+    return apiClient.get(`/ocr-files/${filename}`)
+  },
+
+  // LLM 优化排版
+  optimizeLayout(ocrText, pageInfo = '') {
+    return apiClient.post('/llm/optimize', {
+      ocr_text: ocrText,
+      page_info: pageInfo
+    }, {
+      timeout: 120000  // 2分钟超时
+    })
   }
 }

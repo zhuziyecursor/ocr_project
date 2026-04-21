@@ -7,6 +7,8 @@ from core.database import engine, Base, AsyncSessionLocal
 from api.documents import router as documents_router
 from api.auth import router as auth_router
 from api.reviews import router as reviews_router
+from api.ocr_files import router as ocr_files_router
+from api.llm import router as llm_router
 
 
 async def seed_default_admin():
@@ -58,6 +60,8 @@ app.add_middleware(
 app.include_router(auth_router, prefix=settings.API_PREFIX)
 app.include_router(documents_router, prefix=settings.API_PREFIX)
 app.include_router(reviews_router, prefix=settings.API_PREFIX)
+app.include_router(ocr_files_router, prefix=settings.API_PREFIX)
+app.include_router(llm_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/")

@@ -33,12 +33,33 @@ class CompareService:
         return record.result_json if record else None
 
     def _extract_blocks(self, result_json: Dict) -> List[Dict]:
-        """从 result_json 中展平所有 block，附加 page 号"""
+        """从 result_json 中展平所有 block，附加 page 号
+
+        支持两种格式：
+        - kids 格式（OpenDataLoader 旧格式）：result_json["kids"] 为块列表
+        - Docling 格式：result_json["pages"] 为页面列表，每页有 blocks
+        """
         blocks = []
-        for page in result_json.get("pages", []):
-            page_no = page.get("page_no", page.get("page", 0))
-            for block in page.get("blocks", []):
-                blocks.append({**block, "_page": page_no})
+
+        # kids 格式（扁平结构，块直接带 page number）
+        if "kids" in result_json:
+            for kid in result_json["kids"]:
+                blocks.append({
+                    **kid,
+                    "_page": kid.get("page number", kid.get("page", 1)),
+                    "_source": "kids"
+                })
+        # Docling 格式（page → blocks 层级结构）
+        elif "pages" in result_json:
+            for page in result_json.get("pages", []):
+                page_no = page.get("page_no", page.get("page", 0))
+                for block in page.get("blocks", []):
+                    blocks.append({**block, "_page": page_no, "_source": "docling"})
+        # 兼容纯 texts 顶层结构（某些 Docling 变体）
+        elif "texts" in result_json:
+            for block in result_json["texts"]:
+                page_no = block.get("prov", [{}])[0].get("page_no", 1) if block.get("prov") else 1
+                blocks.append({**block, "_page": page_no, "_source": "docling"})
         return blocks
 
     def _text_similarity(self, a: str, b: str) -> float:
