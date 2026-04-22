@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # OpenDataLoader
     OPENDATALOADER_HOST: str = "localhost"
     OPENDATALOADER_PORT: int = 5002
+    OPENDATALOADER_HYBRID: str = "docling-fast"  # "docling-fast" or "off"
 
     # Storage
     STORAGE_TYPE: str = "local"  # "local" or "minio"

@@ -19,6 +19,7 @@ import org.opendataloader.pdf.api.Config;
 import org.opendataloader.pdf.containers.StaticLayoutContainers;
 import org.verapdf.wcag.algorithms.entities.IObject;
 import org.verapdf.wcag.algorithms.entities.content.IChunk;
+import org.verapdf.wcag.algorithms.entities.content.ImageChunk;
 import org.verapdf.wcag.algorithms.entities.content.LineArtChunk;
 import org.verapdf.wcag.algorithms.entities.content.TextChunk;
 import org.verapdf.wcag.algorithms.entities.geometry.BoundingBox;
@@ -56,6 +57,9 @@ public class ContentFilterProcessor {
         TextProcessor.removeSameTextChunks(pageContents);
         pageContents = DocumentProcessor.removeNullObjectsFromList(pageContents);
         TextProcessor.removeTextDecorationImages(pageContents);
+        pageContents = DocumentProcessor.removeNullObjectsFromList(pageContents);
+        // Filter out tiny images (decorative icons, dividers, etc. that are not real content images)
+        filterTinyImages(pageContents);
         pageContents = DocumentProcessor.removeNullObjectsFromList(pageContents);
         if (config.getFilterConfig().isFilterTinyText()) {
             TextProcessor.filterTinyText(pageContents);
@@ -152,5 +156,30 @@ public class ContentFilterProcessor {
             }
         }
         return newContents;
+    }
+
+    /**
+     * Filters out tiny images that are likely decorative elements (icons, dividers, etc.)
+     * rather than content images.
+     *
+     * <p>Images smaller than MIN_IMAGE_WIDTH x MIN_IMAGE_HEIGHT in PDF point units are
+     * considered decorative and removed from the content list.
+     */
+    private static final double MIN_IMAGE_WIDTH = 50.0;
+    private static final double MIN_IMAGE_HEIGHT = 50.0;
+
+    private static void filterTinyImages(List<IObject> contents) {
+        for (int index = 0; index < contents.size(); index++) {
+            IObject object = contents.get(index);
+            if (object instanceof ImageChunk) {
+                ImageChunk image = (ImageChunk) object;
+                BoundingBox bbox = image.getBoundingBox();
+                double width = bbox.getRightX() - bbox.getLeftX();
+                double height = bbox.getTopY() - bbox.getBottomY();
+                if (width < MIN_IMAGE_WIDTH || height < MIN_IMAGE_HEIGHT) {
+                    contents.set(index, null);
+                }
+            }
+        }
     }
 }

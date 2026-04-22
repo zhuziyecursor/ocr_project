@@ -355,6 +355,12 @@ public class DoclingSchemaTransformer implements HybridSchemaTransformer {
 
     /**
      * Transforms a Docling picture element to a SemanticPicture.
+     *
+     * <p>Implements sub-region deduplication: if a picture's bbox is contained within
+     * an already-added picture's bbox on the same page, it is skipped as a sub-region.
+     * Docling's granular detection may return multiple picture elements for a single
+     * image (e.g., different parts of a chart), and we only want to keep the outermost
+     * bounding box to avoid duplicating image content.
      */
     private void transformPicture(JsonNode pictureNode, List<List<IObject>> result, Map<Integer, Double> pageHeights) {
         // Get provenance for position info
@@ -376,6 +382,14 @@ public class DoclingSchemaTransformer implements HybridSchemaTransformer {
         // Get bounding box
         BoundingBox bbox = extractBoundingBox(firstProv.get("bbox"), pageIndex, pageHeights.get(pageNo));
 
+        // Skip sub-regions: if this bbox is fully contained within an existing
+        // picture's bbox on the same page, it's a sub-region and should be skipped
+        if (isSubRegion(bbox, result.get(pageIndex))) {
+            LOGGER.log(Level.FINE, "Skipping picture sub-region at bbox [{0},{1},{2},{3}]",
+                new Object[]{bbox.getLeftX(), bbox.getBottomY(), bbox.getRightX(), bbox.getTopY()});
+            return;
+        }
+
         // Extract description from annotations (if available)
         String description = extractPictureDescription(pictureNode);
 
@@ -384,6 +398,31 @@ public class DoclingSchemaTransformer implements HybridSchemaTransformer {
         picture.setRecognizedStructureId(StaticLayoutContainers.incrementContentId());
 
         result.get(pageIndex).add(picture);
+    }
+
+    /**
+     * Checks if a bounding box is contained within any existing picture's bbox
+     * on the same page. Used to filter out sub-regions detected by Docling.
+     *
+     * @param bbox The bounding box to check
+     * @param pageContents The list of existing IObjects on the page
+     * @return true if bbox is contained within an existing picture's bbox
+     */
+    private boolean isSubRegion(BoundingBox bbox, List<IObject> pageContents) {
+        for (IObject obj : pageContents) {
+            if (obj instanceof SemanticPicture) {
+                SemanticPicture existing = (SemanticPicture) obj;
+                BoundingBox existingBbox = existing.getBoundingBox();
+                // Check containment: bbox is inside existingBbox if all corners are within
+                if (bbox.getLeftX() >= existingBbox.getLeftX() - 1
+                    && bbox.getRightX() <= existingBbox.getRightX() + 1
+                    && bbox.getBottomY() >= existingBbox.getBottomY() - 1
+                    && bbox.getTopY() <= existingBbox.getTopY() + 1) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

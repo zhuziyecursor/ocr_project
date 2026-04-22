@@ -181,11 +181,12 @@ function renderElement(el, pageHeight, scale = 1) {
       }
       break
     case 'table':
-      div.innerHTML = '[Table]'
+      // 渲染表格内容
       div.style.background = 'rgba(0,0,0,0.02)'
-      div.style.display = 'flex'
-      div.style.alignItems = 'center'
-      div.style.justifyContent = 'center'
+      div.style.display = 'block'
+      div.style.overflow = 'hidden'
+      div.style.fontSize = `${fontSize}px`
+      div.innerHTML = renderTableContent(el, pageHeight, scale)
       break
     default:
       div.textContent = text
@@ -202,6 +203,63 @@ function renderElement(el, pageHeight, scale = 1) {
   }
 
   return div
+}
+
+/**
+ * 渲染表格内容（递归渲染 rows/cells 中的文本）
+ */
+function renderTableContent(tableEl, pageHeight, scale) {
+  const rows = tableEl.rows || []
+  if (!rows.length) return '[Table]'
+
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:inherit;">'
+
+  for (const row of rows) {
+    const cells = row.cells || []
+    html += '<tr>'
+    for (const cell of cells) {
+      const cellBbox = cell['bounding box'] || cell.bbox
+      const rowSpan = cell.row_span || 1
+      const colSpan = cell.column_span || 1
+      let cellWidth = 'auto'
+      if (cellBbox && cellBbox.length >= 4) {
+        // 计算单元格宽度
+        const cellW = (cellBbox[2] - cellBbox[0]) * scale
+        cellWidth = `${cellW}px`
+      }
+      // 递归获取单元格内的文本内容
+      const cellText = extractCellText(cell)
+      html += `<td rowspan="${rowSpan}" colspan="${colSpan}" style="border:1px solid #ddd;padding:4px 6px;vertical-align:top;width:${cellWidth};box-sizing:border-box;">${cellText}</td>`
+    }
+    html += '</tr>'
+  }
+
+  html += '</table>'
+  return html
+}
+
+/**
+ * 递归提取单元格内的文本内容
+ */
+function extractCellText(cell) {
+  // 如果有嵌套的 kids，遍历获取文本
+  const kids = cell.kids || []
+  if (kids.length > 0) {
+    const texts = []
+    for (const kid of kids) {
+      if (kid.type === 'paragraph' || kid.type === 'heading') {
+        const text = kid.text || kid.content || ''
+        if (text.trim()) texts.push(text.trim())
+      } else if (kid.type === 'table row') {
+        // 嵌套的 table row
+        texts.push(extractCellText(kid))
+      }
+    }
+    return texts.join('<br>')
+  }
+  // 直接文本
+  const text = cell.text || cell.content || ''
+  return text.trim()
 }
 
 function renderOcrResult() {

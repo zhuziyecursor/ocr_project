@@ -224,3 +224,111 @@ npm run dev 时端口 3000 已被占用。
 | 使用 docker-compose 启动全量服务 | P1 | 可选 |
 
 ---
+
+## 问题五：Python 模块导入路径错误（Celery Worker 找不到 backend 模块）
+
+**发生时间**：2026-04-22
+
+### 现象
+
+Celery Worker 启动正常，能识别 tasks，但执行 `process_document_task` 时报错：
+```
+ModuleNotFoundError: No module named 'backend'
+```
+
+### 根因
+
+Celery Worker 在 `backend/` 目录内启动时（`cd backend && python -m celery ...`），当前工作目录是 `backend/`。
+
+此时 `from core.config import settings` 可以正常工作（因为 `core` 是 `backend/` 下的子目录）。
+
+但如果写成 `from backend.core.config import settings`，Python 会把 `backend` 当作顶级模块，从项目根目录开始搜索。但项目根目录没有 `backend` 这个名字的目录在 Python 路径中。
+
+### 修复
+
+在 `backend/ocr/wrapper.py` 中使用 `sys.path` 修改：
+
+```python
+import os
+import sys
+
+# Add parent directory to path so 'backend' can be imported as a module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from backend.core.config import settings
+```
+
+### 经验总结
+
+Celery Worker 在 `backend/` 目录内启动时，若该模块需要 import `backend.xxx`，必须先修改 `sys.path` 把项目根目录加进去。
+
+---
+
+## 问题六：docling-fast 模式检测不到图片（hybrid off 模式差异）
+
+**发生时间**：2026-04-22
+
+### 现象
+
+文档第 75 页有一张大图，用 `hybrid="docling-fast"` 模式处理时没有检测到图片。但同一个 PDF 用 GitHub 原版（默认 `hybrid="off"`）能检测到。
+
+### 排查过程
+
+1. 调用 docling-fast API 检查原始输出：`curl -X POST http://localhost:5002/v1/convert/file -F "files=@doc.pdf" -F "page_ranges=75-75"`
+2. docling API 只返回 3 张极小的图片（10x10, 26x27 pts），都小于 50x50 过滤阈值
+3. 文档 75 页的大图在 docling 输出中完全不存在
+
+### 根因
+
+| 模式 | 默认配置 | 行为 |
+|------|----------|------|
+| `hybrid="docling-fast"` | AI 混合模式 | docling 模型检测图片，某些扫描页背景图可能分类为"背景"而非独立图片 |
+| `hybrid="off"` | 纯 Java (veraPDF) | 纯本地处理，无需网络，某些扫描页可能检测到更多图片 |
+
+docling 模型对扫描页面背景图的检测能力弱于纯 Java veraPDF 处理。
+
+### 解决方案
+
+通过 `backend/core/config.py` 中的 `OPENDATALOADER_HYBRID` 配置切换模式：
+- `docling-fast`：AI 能力强，支持表格结构、图表描述增强
+- `off`：纯本地，某些扫描页检测更好
+
+修改后需重启 Celery Worker。
+
+---
+
+## 问题七：EnrichedImageChunk 使用错误的 bounding box 导致图片提取不完整
+
+**发生时间**：2026-04-22
+
+### 现象
+
+docling 检测到的 SemanticPicture 有正确的大 bbox，但最终提取的图片只是一个小 fragment。
+
+### 根因
+
+1. `filterTinyImages` 先过滤掉了小于 50x50 的 Java ImageChunk
+2. `enrichBackendResults` 尝试将 docling 的 SemanticPicture 与 Java ImageChunk 匹配
+3. `EnrichedImageChunk(source, description)` 构造函数使用 `source.getBoundingBox()` — 即被过滤后的 Java ImageChunk 的小 bbox
+4. `ImagesUtils.writeImage()` 用这个 tiny bbox 提取图片，只提取了一小块
+
+### 修复
+
+EnrichedImageChunk 新增 3 参数构造函数，允许传入正确的 extraction bbox：
+
+```java
+public EnrichedImageChunk(ImageChunk source, BoundingBox extractionBbox, String description) {
+    super(extractionBbox);  // 使用传入的正确 bbox
+    // ...
+}
+```
+
+调用处改为：
+```java
+enriched.add(new EnrichedImageChunk(matched, picture.getBoundingBox(), picture.getDescription()));
+```
+
+### 经验总结
+
+匹配 Backend 结果时，如果 backend 的 bbox 与 Java 的不一致，必须使用 backend 的 bbox 进行图片提取，而非 Java 侧的 bbox。
+
+---

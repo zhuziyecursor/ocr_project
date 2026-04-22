@@ -8,10 +8,15 @@ OpenDataLoader封装层
 """
 
 import os
+import sys
 import json
 import shutil
 import uuid
 from typing import Optional, List
+
+# Add parent directory to path so 'core' can be imported
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.config import settings
 
 
 class OpenDataLoaderWrapper:
@@ -47,7 +52,7 @@ class OpenDataLoaderWrapper:
         format: str = "json",
         table_method: str = "cluster",
         image_output: str = "external",
-        hybrid: str = "docling-fast",
+        hybrid: Optional[str] = None,
         hybrid_mode: str = "full",
         sanitize: bool = True,
         force_ocr: bool = True,
@@ -77,6 +82,9 @@ class OpenDataLoaderWrapper:
         os.makedirs(output_dir, exist_ok=True)
 
         try:
+            # Use config setting as default when hybrid is not specified
+            effective_hybrid = hybrid if hybrid is not None else settings.OPENDATALOADER_HYBRID
+
             opendataloader_pdf.convert(
                 input_path=[file_path],
                 output_dir=output_dir,
@@ -84,10 +92,10 @@ class OpenDataLoaderWrapper:
                 quiet=True,
                 table_method=table_method,
                 image_output=image_output,
-                hybrid=hybrid,
-                hybrid_mode=hybrid_mode,
+                hybrid=effective_hybrid,
+                hybrid_mode="full",
                 hybrid_ocr="force" if force_ocr else "auto",
-                hybrid_url=f"http://{self.host}:{self.port}" if hybrid != "off" else None,
+                hybrid_url=f"http://{self.host}:{self.port}" if effective_hybrid != "off" else None,
             )
 
             # 读取生成的 JSON 文件

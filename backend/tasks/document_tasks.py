@@ -140,67 +140,18 @@ def process_document_task(self, document_id: str, file_path: str):
             try:
                 wrapper = OpenDataLoaderWrapper()
 
-                # 分块处理日志（每块50页）
-                page_logs = []
-                CHUNK_SIZE = 50
-                start_page = 1
+                # 记录处理日志
+                processing_start = datetime.now()
 
-                # 先获取总页数（通过 convert_chunk 获取第一块来估算）
-                first_chunk = wrapper.convert_chunk(file_path, start_page=1, end_page=CHUNK_SIZE)
-                first_chunk_start = datetime.now()
-                total_pages_estimate = max([kid.get("page number", 0) for kid in first_chunk.get("kids", [])] or [0])
+                # 调用 OpenDataLoader（同时复制图片到本地目录）
+                raw_result = wrapper.convert_with_images(
+                    file_path,
+                    target_images_dir=os.path.join(LOCAL_RESULT_DIR, "images")
+                )
 
-                # 记录第一块
-                page_logs.append({
-                    "chunk": f"1-{CHUNK_SIZE}",
-                    "pages": list(range(1, CHUNK_SIZE + 1)),
-                    "processing_path": "backend",
-                    "model": "docling-fast",
-                    "start_time": first_chunk_start.isoformat(),
-                    "end_time": datetime.now().isoformat(),
-                    "duration_ms": int((datetime.now() - first_chunk_start).total_seconds() * 1000),
-                    "blocks_count": len(first_chunk.get("kids", []))
-                })
+                processing_end = datetime.now()
 
-                # 继续处理剩余块
-                all_kids = first_chunk.get("kids", [])
-                start_page = CHUNK_SIZE + 1
-
-                while start_page <= total_pages_estimate:
-                    chunk_result = wrapper.convert_chunk(file_path, start_page=start_page, end_page=start_page + CHUNK_SIZE - 1)
-                    chunk_start = datetime.now()
-                    chunk_kids = chunk_result.get("kids", [])
-                    all_kids.extend(chunk_kids)
-
-                    actual_end = start_page
-                    for kid in chunk_kids:
-                        pn = kid.get("page number", 0)
-                        if pn > actual_end:
-                            actual_end = pn
-
-                    page_logs.append({
-                        "chunk": f"{start_page}-{start_page + CHUNK_SIZE - 1}",
-                        "pages": list(range(start_page, start_page + CHUNK_SIZE)),
-                        "processing_path": "backend",
-                        "model": "docling-fast",
-                        "start_time": chunk_start.isoformat(),
-                        "end_time": datetime.now().isoformat(),
-                        "duration_ms": int((datetime.now() - chunk_start).total_seconds() * 1000),
-                        "blocks_count": len(chunk_kids)
-                    })
-
-                    if len(chunk_kids) < CHUNK_SIZE:
-                        break
-                    start_page += CHUNK_SIZE
-
-                # 构建结果
-                raw_result = {
-                    "file name": first_chunk.get("file name", ""),
-                    "number of pages": total_pages_estimate,
-                    "kids": all_kids
-                }
-
-                if not raw_result.get("kids"):
+                if raw_result is None:
                     raise ValueError(
                         "OpenDataLoader 返回空结果，可能是文件损坏、格式不支持或 Hybrid Server 异常。"
                         f"文件路径：{file_path}"
@@ -216,7 +167,16 @@ def process_document_task(self, document_id: str, file_path: str):
                 # 4. 保存到本地目录
                 json_path, images_dir, saved_result = save_to_local(enhanced_result, LOCAL_RESULT_DIR)
 
-                # 保存处理日志
+                # 保存处理日志（整个文件作为一块）
+                page_logs = [{
+                    "chunk": "1-all",
+                    "processing_path": "hybrid",
+                    "model": "docling-fast",
+                    "start_time": processing_start.isoformat(),
+                    "end_time": processing_end.isoformat(),
+                    "duration_ms": int((processing_end - processing_start).total_seconds() * 1000),
+                    "blocks_count": len(saved_result.get("kids", []))
+                }]
                 log_path = os.path.join(LOCAL_RESULT_DIR, "page_processing_log.json")
                 with open(log_path, "w", encoding="utf-8") as f:
                     json.dump(page_logs, f, ensure_ascii=False, indent=2)
@@ -230,6 +190,7 @@ def process_document_task(self, document_id: str, file_path: str):
                 db.add(result_record)
 
                 # 6. 更新状态为完成
+                total_pages_estimate = saved_result.get("number of pages", saved_result.get("total_pages", 0))
                 await service.update_document_status(
                     document_id, "DONE",
                     total_pages=total_pages_estimate

@@ -37,6 +37,19 @@ cd frontend && npm run dev
 
 **注意：** OCR 引擎通过 `opendataloader_pdf.convert()` 直接调用 Java CLI，不再需要启动独立的 HTTP 服务。
 
+### OCR 引擎配置
+
+`backend/core/config.py` 中的 `OPENDATALOADER_HYBRID` 参数控制文档识别模式：
+
+| 配置值 | 说明 | 特点 |
+|--------|------|------|
+| `docling-fast`（默认） | 混合模式，文档发送给 docling-fast 服务器处理 | AI 识别能力强，支持表格结构、图表描述增强 |
+| `off` | 纯 Java 模式（veraPDF） | 纯本地处理，无需网络；某些扫描页面可能检测到更多图片 |
+
+**修改方式：** 编辑 `backend/core/config.py`，修改 `OPENDATALOADER_HYBRID` 的值。
+
+**注意：** 切换 `hybrid` 配置后需重启 Celery Worker 使其生效。
+
 ### 默认管理员账号
 
 ```

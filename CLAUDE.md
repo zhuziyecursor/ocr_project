@@ -80,6 +80,23 @@ cd frontend && npm run dev
 5. 数字比对必须先经过 `NumberNormalizer.normalize()`
 6. 识别结果同时存储到数据库和本地 `ocr_res/{document_id}/` 目录
 
+## 核心功能修改规范（铁律）
+
+**修改 bug 或添加新功能时，严禁修改核心功能。**
+
+核心功能包括但不限于：
+- `process_document_task` 的主流程（OCR 调用链路）
+- `OpenDataLoaderWrapper.convert()` / `convert_with_images()` 的调用方式
+- 数据的存储结构（result_json、kids 格式）
+- API 的核心返回格式
+
+如果必须修改核心功能，必须：
+1. 先向用户说明修改内容和原因
+2. 获得用户明确确认后才能执行
+3. 修改后立即验证不影响现有功能
+
+**违反此规范的修改，即使代码能运行，也必须回退。**
+
 ## 已知限制
 
 - `services/compare_service.py`：kids 格式下比对功能可能返回空结果
