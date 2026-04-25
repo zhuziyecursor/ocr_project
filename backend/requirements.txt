@@ -27,5 +27,5 @@ httpx>=0.25.0
 # MinIO
 minio>=7.1.0
 
-# OpenDataLoader (HTTP 调用远程服务，无需本地安装)
-# 注意：OpenDataLoader Hybrid Server 需要单独部署在 5002 端口
+# OpenDataLoader
+opendataloader-pdf==1.8.1

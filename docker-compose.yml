@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: ocr_db
     ports:
-      - "5432:5432"
+      - "15432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +22,7 @@ services:
     image: redis:7-alpine
     container_name: ocr_redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -35,8 +35,8 @@ services:
     image: minio/minio:latest
     container_name: ocr_minio
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "19000:9000"
+      - "19001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -55,7 +55,7 @@ services:
       dockerfile: Dockerfile
     container_name: ocr_backend
     ports:
-      - "8000:8000"
+      - "8200:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/ocr_db
       REDIS_URL: redis://redis:6379/0
@@ -68,6 +68,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./backend/source_file:/app/source_file
       - /tmp/ocr_project:/tmp/ocr_project
       - recognition_results:/data/recognition_results
 
@@ -89,6 +90,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./backend/source_file:/app/source_file
       - /tmp/ocr_project:/tmp/ocr_project
       - recognition_results:/data/recognition_results
 

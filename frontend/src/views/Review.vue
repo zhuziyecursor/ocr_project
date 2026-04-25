@@ -14,7 +14,7 @@ const documentStore = useDocumentStore()
 const compareStore = useCompareStore()
 
 const docId = route.params.docId
-const scale = ref(1.0)
+const scale = ref(1.5)
 const activeBlockId = ref(null)
 const pdfPanelRef = ref(null)
 const ocrPanelRef = ref(null)

@@ -39,15 +39,22 @@ OCR_PROJECT/
 ## 启动命令
 
 ```bash
-# 后端
-cd backend && uvicorn main:app --reload --port 8082
+# 后端（端口 8200）
+cd backend && python3 -m uvicorn main:app --reload --port 8200
 
 # Celery Worker（必须在 backend 目录内执行）
 cd backend && python3 -m celery -A tasks.document_tasks:celery_app worker --loglevel=info
 
-# 前端
+# 前端（端口 3200）
 cd frontend && npm run dev
 ```
+
+服务端口：
+- Frontend: 3200
+- Backend API: 8200
+- PostgreSQL: 15432
+- Redis: 6380
+- MinIO: 19000/19001
 
 **注意：** OCR 引擎通过 `opendataloader_pdf.convert()` 直接调用 Java CLI，不再依赖 HTTP 服务。
 

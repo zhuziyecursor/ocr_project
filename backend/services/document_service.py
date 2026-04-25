@@ -34,8 +34,8 @@ class DocumentService:
         file_id = str(uuid.uuid4())
         file_path = f"documents/{file_id}/{file.filename}"
 
-        # 保存文件到本地存储（简化版本，后续可扩展为MinIO）
-        save_dir = f"/tmp/ocr_project/{file_id}"
+        # 保存文件到本地存储
+        save_dir = f"/app/source_file/{file_id}"
         os.makedirs(save_dir, exist_ok=True)
         save_path = f"{save_dir}/{file.filename}"
 
